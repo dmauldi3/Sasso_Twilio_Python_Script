@@ -23,6 +23,12 @@ TECHNICIAN_NUMBER = os.getenv("TECHNICIAN_NUMBER")
 # Flask app setup
 app = Flask(__name__)
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logging.error(f"Unhandled Exception: {e}", exc_info=True)
+    return Response("An internal error occurred.", status=500)
+
+
 
 @app.route("/voice", methods=['POST'])
 def voice():
