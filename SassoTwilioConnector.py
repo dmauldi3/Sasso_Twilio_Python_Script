@@ -28,8 +28,6 @@ def handle_exception(e):
     logging.error(f"Unhandled Exception: {e}", exc_info=True)
     return Response("An internal error occurred.", status=500)
 
-
-
 @app.route("/voice", methods=['POST'])
 def voice():
     """Initial call handler"""
@@ -43,7 +41,6 @@ def voice():
     resp.append(gather)
     resp.redirect('/voice')  # Repeat if no input
     return Response(str(resp), mimetype='text/xml')
-
 
 @app.route("/menu", methods=['POST'])
 def menu():
@@ -81,7 +78,6 @@ def menu():
 
     return Response(str(resp), mimetype='text/xml')
 
-
 @app.route("/goodbye", methods=['POST'])
 def goodbye():
     logging.info("Voicemail ended. Sending goodbye message.")
@@ -89,7 +85,6 @@ def goodbye():
     resp.say("Thank you. We’ll call you back soon.")
     resp.hangup()
     return Response(str(resp), mimetype='text/xml')
-
 
 def has_active_subscription(phone_number):
     """Check if customer has active Stripe subscription using phone number as metadata"""
@@ -105,7 +100,6 @@ def has_active_subscription(phone_number):
     except Exception as e:
         logging.error(f"Stripe error checking subscription for {phone_number}: {e}")
     return False
-
 
 def send_payment_link(phone_number):
     """Send a Stripe Checkout link via SMS using Twilio"""
@@ -131,18 +125,7 @@ def send_payment_link(phone_number):
         logging.info(f"Payment link sent to {phone_number}: {session.url}")
     except Exception as e:
         logging.error(f"Error sending payment link to {phone_number}: {e}")
-from pyngrok import ngrok
 
 if __name__ == "__main__":
-    # Authenticate Ngrok with the token from your .env file
-    NGROK_AUTH_TOKEN = os.getenv("NGROK_AUTH_TOKEN")
-    if NGROK_AUTH_TOKEN:
-        ngrok.set_auth_token(NGROK_AUTH_TOKEN)
-
-    # Open public tunnel on port 5000
-    public_url = ngrok.connect(5000)
-    logging.info(f"Ngrok tunnel started at {public_url}")
-    logging.info("Paste this URL into your Twilio webhook: {public_url}/voice")
-
-    # Start Flask server
-    app.run(port=5000)
+    # Start Flask on all interfaces so Twilio can reach it
+    app.run(host="0.0.0.0", port=5000)
