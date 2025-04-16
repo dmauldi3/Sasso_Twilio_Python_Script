@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import os
 import stripe
 import logging
+import requests  # << ADD THIS to call Freshdesk
 
 # Load environment variables from .env
 load_dotenv()
@@ -12,7 +13,7 @@ load_dotenv()
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Set up API keys from environment
+# Twilio / Stripe / Freshdesk Credentials
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 TWILIO_SID = os.getenv("TWILIO_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
@@ -20,7 +21,9 @@ TWILIO_PHONE = os.getenv("TWILIO_PHONE")
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
 TECHNICIAN_NUMBER = os.getenv("TECHNICIAN_NUMBER")
 
-# Flask app setup
+FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")  # e.g. "mycompany.freshdesk.com"
+FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")  # see Profile settings in Freshdesk
+
 app = Flask(__name__)
 
 @app.errorhandler(Exception)
@@ -62,15 +65,25 @@ def menu():
             logging.info(f"No active subscription found for {from_number}")
             resp.say("No active subscription found.")
             resp.redirect('/voice')
+
     elif digit_pressed == '2':
         logging.info(f"{from_number} selected to leave a voicemail.")
-        resp.say("Please leave a message after the tone.")
-        resp.record(maxLength=60, action="/goodbye")
+        resp.say("Please leave a message after the tone. We'll create a support ticket from your voicemail.")
+        # Instead of finalizing the call, record and then call /voicemail-freshdesk
+        # Twilio will POST the recording data (RecordingUrl, etc.) to our new route
+        resp.record(
+            maxLength=60,
+            action="/voicemail-freshdesk"
+        )
+        # Twilio will automatically end the call after recording,
+        # or route to /voicemail-freshdesk. We won't do resp.hangup() here.
+
     elif digit_pressed == '3':
         logging.info(f"{from_number} requested a payment link.")
         send_payment_link(from_number)
         resp.say("A payment link has been sent via text. Thank you.")
         resp.hangup()
+
     else:
         logging.warning(f"{from_number} pressed an invalid option: {digit_pressed}")
         resp.say("Invalid option.")
@@ -78,13 +91,70 @@ def menu():
 
     return Response(str(resp), mimetype='text/xml')
 
-@app.route("/goodbye", methods=['POST'])
-def goodbye():
-    logging.info("Voicemail ended. Sending goodbye message.")
+@app.route("/voicemail-freshdesk", methods=['POST'])
+def voicemail_freshdesk():
+    """
+    Twilio will POST here after recording the voicemail.
+    We'll receive RecordingUrl, RecordingDuration, Caller phone, etc.
+    Then create a Freshdesk ticket with that info.
+    """
+    recording_url = request.form.get('RecordingUrl')
+    from_number = request.form.get('From') or "Unknown"
+    call_sid = request.form.get('CallSid', 'N/A')
+    duration = request.form.get('RecordingDuration', '0')
+
+    logging.info(f"Voicemail ended. Creating Freshdesk ticket for {from_number}. RecordingUrl: {recording_url}")
+
+    # Format the ticket details
+    subject = f"New Voicemail from {from_number}"
+    description = (
+        f"Call SID: {call_sid}\n"
+        f"Caller: {from_number}\n"
+        f"Duration: {duration} seconds\n"
+        f"Voicemail Recording: {recording_url}.mp3\n\n"
+        "Please follow up with the caller."
+    )
+
+    # Create Freshdesk ticket
+    create_freshdesk_ticket(subject, description)
+
     resp = VoiceResponse()
-    resp.say("Thank you. We’ll call you back soon.")
+    resp.say("Thank you. We have created a support ticket from your voicemail. Goodbye.")
     resp.hangup()
     return Response(str(resp), mimetype='text/xml')
+
+def create_freshdesk_ticket(subject, description):
+    """
+    Calls Freshdesk API to create a ticket.
+    Adjust fields as needed (priority, status, etc.).
+    """
+    freshdesk_url = f"https://{FRESHDESK_DOMAIN}/api/v2/tickets"
+
+    # Sample ticket data (customize for your Freshdesk instance)
+    ticket_data = {
+        "subject": subject,
+        "description": description,
+        "email": "no-reply@sassousa-service.com",  # or a caller's email if known
+        "priority": 1,  # 1=Low,2=Medium,3=High,4=Urgent
+        "status": 2     # 2=Open,3=Pending,4=Resolved,5=Closed
+    }
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    # Freshdesk uses HTTP Basic Auth with the API key as the username and X as the password
+    response = requests.post(
+        freshdesk_url,
+        headers=headers,
+        json=ticket_data,
+        auth=(FRESHDESK_API_KEY, "X")
+    )
+
+    if response.status_code == 201:
+        logging.info("Freshdesk ticket created successfully.")
+    else:
+        logging.error(f"Failed to create Freshdesk ticket. Status code: {response.status_code}, Response: {response.text}")
 
 def has_active_subscription(phone_number):
     """Check if customer has active Stripe subscription using phone number as metadata"""
@@ -127,5 +197,4 @@ def send_payment_link(phone_number):
         logging.error(f"Error sending payment link to {phone_number}: {e}")
 
 if __name__ == "__main__":
-    # Start Flask on all interfaces so Twilio can reach it
     app.run(host="0.0.0.0", port=5000)
