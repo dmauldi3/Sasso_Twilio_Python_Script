@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 import stripe
 import logging
-import requests  # << ADD THIS to call Freshdesk
+import requests  # used to call Freshdesk
 
 # Load environment variables from .env
 load_dotenv()
@@ -69,14 +69,11 @@ def menu():
     elif digit_pressed == '2':
         logging.info(f"{from_number} selected to leave a voicemail.")
         resp.say("Please leave a message after the tone. We'll create a support ticket from your voicemail.")
-        # Instead of finalizing the call, record and then call /voicemail-freshdesk
-        # Twilio will POST the recording data (RecordingUrl, etc.) to our new route
         resp.record(
             maxLength=60,
             action="/voicemail-freshdesk"
         )
-        # Twilio will automatically end the call after recording,
-        # or route to /voicemail-freshdesk. We won't do resp.hangup() here.
+        # Twilio ends the call or routes to /voicemail-freshdesk after recording
 
     elif digit_pressed == '3':
         logging.info(f"{from_number} requested a payment link.")
@@ -105,7 +102,6 @@ def voicemail_freshdesk():
 
     logging.info(f"Voicemail ended. Creating Freshdesk ticket for {from_number}. RecordingUrl: {recording_url}")
 
-    # Format the ticket details
     subject = f"New Voicemail from {from_number}"
     description = (
         f"Call SID: {call_sid}\n"
@@ -115,7 +111,6 @@ def voicemail_freshdesk():
         "Please follow up with the caller."
     )
 
-    # Create Freshdesk ticket
     create_freshdesk_ticket(subject, description)
 
     resp = VoiceResponse()
@@ -130,7 +125,6 @@ def create_freshdesk_ticket(subject, description):
     """
     freshdesk_url = f"https://{FRESHDESK_DOMAIN}/api/v2/tickets"
 
-    # Sample ticket data (customize for your Freshdesk instance)
     ticket_data = {
         "subject": subject,
         "description": description,
@@ -143,7 +137,7 @@ def create_freshdesk_ticket(subject, description):
         "Content-Type": "application/json"
     }
 
-    # Freshdesk uses HTTP Basic Auth with the API key as the username and X as the password
+    # Basic Auth with API key
     response = requests.post(
         freshdesk_url,
         headers=headers,
@@ -157,15 +151,33 @@ def create_freshdesk_ticket(subject, description):
         logging.error(f"Failed to create Freshdesk ticket. Status code: {response.status_code}, Response: {response.text}")
 
 def has_active_subscription(phone_number):
-    """Check if customer has active Stripe subscription using phone number as metadata"""
+    """
+    Checks if 'phone_number' belongs to any Stripe customer who has an active subscription.
+
+    We compare both:
+      1) main phone (customer.phone)
+      2) a comma-separated list of additional phones in customer.metadata["additional_phones"].
+
+    e.g. metadata = {"additional_phones": "+15551230001,+15551230002"}
+    """
     try:
         customers = stripe.Customer.list(limit=100)
         for customer in customers.auto_paging_iter():
-            if customer.get("phone") == phone_number:
+            # Main phone
+            main_phone = (customer.get("phone") or "").strip()
+
+            # Additional phones in metadata
+            extra_phones_str = customer.get("metadata", {}).get("additional_phones", "")
+            extra_phones = [p.strip() for p in extra_phones_str.split(",") if p.strip()]
+
+            # If the caller's phone matches the main phone or any in the additional list
+            if phone_number == main_phone or phone_number in extra_phones:
+                # Check if there's any active subscription for that customer
                 subs = stripe.Subscription.list(customer=customer.id, status="active")
                 if subs.data:
                     logging.info(f"Active subscription found for {phone_number}")
                     return True
+
         logging.info(f"No active subscription found for {phone_number}")
     except Exception as e:
         logging.error(f"Stripe error checking subscription for {phone_number}: {e}")
