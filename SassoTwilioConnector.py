@@ -21,9 +21,11 @@ TWILIO_SID = os.getenv("TWILIO_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE = os.getenv("TWILIO_PHONE")
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
-TECHNICIAN_NUMBER = os.getenv("TECHNICIAN_NUMBER")
+# We'll store multiple technician numbers in a comma-separated .env variable, e.g.
+# TECHNICIAN_NUMBERS="+15551230001,+15551234444"
+TECHNICIAN_NUMBERS = os.getenv("TECHNICIAN_NUMBERS", "")
 
-FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")  # e.g. "mycompany.freshdesk.com"
+FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
 FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
 
 app = Flask(__name__)
@@ -41,7 +43,7 @@ def is_business_hours():
     central_tz = pytz.timezone("US/Central")
     now_central = datetime.now(central_tz)
     hour = now_central.hour
-    # Simple daily check. Adjust if you only do weekdays, etc.
+    # Adjust if you only do weekdays, etc.
     return (hour >= 8) and (hour < 19)
 
 @app.route("/voice", methods=['POST'])
@@ -73,16 +75,19 @@ def menu():
         if has_active_subscription(from_number):
             logging.info(f"Subscription verified for {from_number}.")
             if is_business_hours():
-                # Within business hours: attempt live dial
-                logging.info("Within business hours. Attempting live dial to technician.")
+                logging.info("Within business hours. Attempting live dial to multiple technicians.")
                 resp.say("Verifying your subscription. One moment.")
-                resp.dial(
-                    TECHNICIAN_NUMBER,
-                    timeout=30,
-                    timeLimit=600,
-                    action="/dial-complete",  # calls this route after dial ends
-                    method="POST"
-                )
+
+                # We'll do a simultaneous ring to multiple numbers
+                tech_numbers = [num.strip() for num in TECHNICIAN_NUMBERS.split(",") if num.strip()]
+
+                # Create a <Dial> block with an action to /dial-complete
+                dial = Dial(action="/dial-complete", method="POST", timeout=30, timeLimit=600)
+                for tn in tech_numbers:
+                    # Each 'number' tag will ring simultaneously
+                    dial.number(tn)
+                resp.append(dial)
+
             else:
                 # Outside business hours → direct to after-hours voicemail
                 logging.info("Outside business hours. Sending to premium after-hours voicemail.")
@@ -106,14 +111,12 @@ def menu():
         send_payment_link(from_number)
         resp.say("A payment link has been sent via text. Thank you.")
         resp.hangup()
-
     else:
         logging.warning(f"{from_number} pressed an invalid option: {digit_pressed}")
         resp.say("Invalid option.")
         resp.redirect('/voice')
 
     return Response(str(resp), mimetype='text/xml')
-
 
 @app.route("/dial-complete", methods=['POST'])
 def dial_complete():
@@ -128,14 +131,14 @@ def dial_complete():
     resp = VoiceResponse()
 
     if dial_status == "completed":
-        # The call was answered and ended normally
+        # The call was answered by at least one technician
         logging.info("Technician call completed successfully.")
         resp.say("Thank you for calling Sasso Premium Support. Goodbye.")
         resp.hangup()
     else:
-        # No-answer, busy, fail → route to premium no-answer voicemail
-        logging.info("Technician did not answer. Sending caller to premium no-answer voicemail.")
-        resp.say("We're sorry, our technician is not available right now. Please leave a message.")
+        # No-answer, busy, fail => route to premium no-answer voicemail
+        logging.info("No technicians answered. Sending caller to premium no-answer voicemail.")
+        resp.say("We're sorry, our technicians are not available right now. Please leave a message.")
         resp.record(
             maxLength=60,
             action="/voicemail-freshdesk-premium-no-answer"
@@ -146,7 +149,7 @@ def dial_complete():
 @app.route("/voicemail-freshdesk-premium-no-answer", methods=['POST'])
 def voicemail_freshdesk_premium_no_answer():
     """
-    User is a premium caller, in business hours, but the technician did not answer.
+    A premium user, in business hours, but no tech answered any of the numbers.
     Creates a higher-priority Freshdesk ticket labeled "Premium No-Answer."
     """
     recording_url = request.form.get('RecordingUrl')
@@ -162,18 +165,17 @@ def voicemail_freshdesk_premium_no_answer():
         f"Caller: {from_number}\n"
         f"Duration: {duration} seconds\n"
         f"Voicemail Recording: {recording_url}.mp3\n\n"
-        "Technician did not answer the premium support line during business hours.\n"
+        "None of the technicians answered the premium support line during business hours.\n"
         "This needs immediate follow-up."
     )
 
-    # Could set priority=2 or 3 to highlight it more than standard voicemails
+    # Priority=2 or 3 as needed
     create_freshdesk_ticket(subject, description, priority=2)
 
     resp = VoiceResponse()
     resp.say("Thank you. We’ve created a premium support ticket from your voicemail. Goodbye.")
     resp.hangup()
     return Response(str(resp), mimetype='text/xml')
-
 
 @app.route("/voicemail-freshdesk-after-hours", methods=['POST'])
 def voicemail_freshdesk_after_hours():
@@ -237,7 +239,7 @@ def voicemail_freshdesk():
 
 def create_freshdesk_ticket(subject, description, priority=1):
     """
-    Calls Freshdesk API to create a ticket with a given priority.
+    Calls Freshdesk API to create a ticket.
     priority: 1=Low,2=Medium,3=High,4=Urgent
     """
     freshdesk_url = f"https://{FRESHDESK_DOMAIN}/api/v2/tickets"
@@ -266,7 +268,7 @@ def create_freshdesk_ticket(subject, description, priority=1):
 def has_active_subscription(phone_number):
     """
     Checks if 'phone_number' belongs to any Stripe customer who has an active subscription.
-    Checks main phone and metadata["additional_phones"] for a match.
+    Compares both main phone and metadata["additional_phones"].
     """
     try:
         customers = stripe.Customer.list(limit=100)
