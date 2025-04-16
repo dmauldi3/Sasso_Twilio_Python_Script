@@ -21,8 +21,7 @@ TWILIO_SID = os.getenv("TWILIO_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE = os.getenv("TWILIO_PHONE")
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
-# We'll store multiple technician numbers in a comma-separated .env variable, e.g.
-# TECHNICIAN_NUMBERS="+15551230001,+15551234444"
+# We'll store multiple technician numbers in a comma-separated .env variable, e.g. TECHNICIAN_NUMBERS="+15551230001,+15551234444"
 TECHNICIAN_NUMBERS = os.getenv("TECHNICIAN_NUMBERS", "")
 
 FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
@@ -37,14 +36,21 @@ def handle_exception(e):
 
 def is_business_hours():
     """
-    Returns True if current time in US/Central is between 8:00 and 19:00 (7pm),
-    otherwise False.
+    Returns True if current time in US/Central is Monday-Friday,
+    and between 8:00 (8am) and 19:00 (7pm).
+
+    Otherwise, returns False (including weekends).
     """
     central_tz = pytz.timezone("US/Central")
     now_central = datetime.now(central_tz)
+
+    day_of_week = now_central.weekday()  # Monday=0, Sunday=6
     hour = now_central.hour
-    # Adjust if you only do weekdays, etc.
-    return (hour >= 8) and (hour < 19)
+
+    # Only Monday-Friday (day_of_week < 5) and between 8am and 7pm
+    if day_of_week < 5 and (8 <= hour < 19):
+        return True
+    return False
 
 @app.route("/voice", methods=['POST'])
 def voice():
@@ -75,7 +81,7 @@ def menu():
         if has_active_subscription(from_number):
             logging.info(f"Subscription verified for {from_number}.")
             if is_business_hours():
-                logging.info("Within business hours. Attempting live dial to multiple technicians.")
+                logging.info("Weekday & within business hours. Attempting live dial to multiple technicians.")
                 resp.say("Verifying your subscription. One moment.")
 
                 # We'll do a simultaneous ring to multiple numbers
@@ -89,8 +95,8 @@ def menu():
                 resp.append(dial)
 
             else:
-                # Outside business hours → direct to after-hours voicemail
-                logging.info("Outside business hours. Sending to premium after-hours voicemail.")
+                # It's either after 7pm, before 8am, or weekend => after-hours
+                logging.info("Outside business hours or weekend. Sending to premium after-hours voicemail.")
                 resp.say("We're currently closed. Please leave a message after the tone, and we'll respond promptly.")
                 resp.record(
                     maxLength=60,
@@ -180,7 +186,7 @@ def voicemail_freshdesk_premium_no_answer():
 @app.route("/voicemail-freshdesk-after-hours", methods=['POST'])
 def voicemail_freshdesk_after_hours():
     """
-    Twilio POSTs here if a premium user calls outside business hours.
+    Twilio POSTs here if a premium user calls outside business hours (or weekend).
     Higher priority than standard.
     """
     recording_url = request.form.get('RecordingUrl')
@@ -196,7 +202,7 @@ def voicemail_freshdesk_after_hours():
         f"Caller: {from_number}\n"
         f"Duration: {duration} seconds\n"
         f"Voicemail Recording: {recording_url}.mp3\n\n"
-        "Caller has a premium support subscription but called after normal business hours.\n"
+        "Caller has a premium support subscription but called outside normal business hours (or weekend).\n"
         "Please prioritize follow-up."
     )
 
@@ -268,7 +274,7 @@ def create_freshdesk_ticket(subject, description, priority=1):
 def has_active_subscription(phone_number):
     """
     Checks if 'phone_number' belongs to any Stripe customer who has an active subscription.
-    Compares both main phone and metadata["additional_phones"].
+    Compares both main phone and metadata["additional_phones"] for a match.
     """
     try:
         customers = stripe.Customer.list(limit=100)
