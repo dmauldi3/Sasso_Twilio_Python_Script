@@ -5,7 +5,9 @@ from dotenv import load_dotenv
 import os
 import stripe
 import logging
-import requests  # used to call Freshdesk
+import requests
+import pytz
+from datetime import datetime
 
 # Load environment variables from .env
 load_dotenv()
@@ -22,7 +24,7 @@ STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
 TECHNICIAN_NUMBER = os.getenv("TECHNICIAN_NUMBER")
 
 FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")  # e.g. "mycompany.freshdesk.com"
-FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")  # see Profile settings in Freshdesk
+FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
 
 app = Flask(__name__)
 
@@ -30,6 +32,17 @@ app = Flask(__name__)
 def handle_exception(e):
     logging.error(f"Unhandled Exception: {e}", exc_info=True)
     return Response("An internal error occurred.", status=500)
+
+def is_business_hours():
+    """
+    Returns True if current time in US/Central is between 8:00 and 19:00 (7pm),
+    otherwise False.
+    """
+    central_tz = pytz.timezone("US/Central")
+    now_central = datetime.now(central_tz)
+    hour = now_central.hour
+    # Simple daily check. Adjust as needed if you only do weekdays, etc.
+    return (hour >= 8) and (hour < 19)
 
 @app.route("/voice", methods=['POST'])
 def voice():
@@ -58,29 +71,35 @@ def menu():
     if digit_pressed == '1':
         logging.info(f"Checking subscription for {from_number}")
         if has_active_subscription(from_number):
-            logging.info(f"Subscription verified for {from_number}. Connecting to technician.")
-            resp.say("Verifying your subscription. One moment.")
-            resp.dial(TECHNICIAN_NUMBER)
+            logging.info(f"Subscription verified for {from_number}.")
+            if is_business_hours():
+                # During business hours, connect immediately to technician
+                logging.info("Within business hours. Connecting to technician.")
+                resp.say("Verifying your subscription. One moment.")
+                resp.dial(TECHNICIAN_NUMBER)
+            else:
+                # Outside business hours, route to after-hours voicemail
+                logging.info("Outside business hours. Sending to premium after-hours voicemail.")
+                resp.say("We're currently closed. Please leave a message after the tone, and we'll respond promptly.")
+                resp.record(
+                    maxLength=60,
+                    action="/voicemail-freshdesk-after-hours"
+                )
         else:
             logging.info(f"No active subscription found for {from_number}")
             resp.say("No active subscription found.")
             resp.redirect('/voice')
 
     elif digit_pressed == '2':
-        logging.info(f"{from_number} selected to leave a voicemail.")
+        logging.info(f"{from_number} selected to leave a voicemail (non-premium).")
         resp.say("Please leave a message after the tone. We'll create a support ticket from your voicemail.")
-        resp.record(
-            maxLength=60,
-            action="/voicemail-freshdesk"
-        )
-        # Twilio ends the call or routes to /voicemail-freshdesk after recording
+        resp.record(maxLength=60, action="/voicemail-freshdesk")
 
     elif digit_pressed == '3':
         logging.info(f"{from_number} requested a payment link.")
         send_payment_link(from_number)
         resp.say("A payment link has been sent via text. Thank you.")
         resp.hangup()
-
     else:
         logging.warning(f"{from_number} pressed an invalid option: {digit_pressed}")
         resp.say("Invalid option.")
@@ -91,16 +110,14 @@ def menu():
 @app.route("/voicemail-freshdesk", methods=['POST'])
 def voicemail_freshdesk():
     """
-    Twilio will POST here after recording the voicemail.
-    We'll receive RecordingUrl, RecordingDuration, Caller phone, etc.
-    Then create a Freshdesk ticket with that info.
+    Twilio POSTs here after recording a generic (non-premium or no-subscription) voicemail.
     """
     recording_url = request.form.get('RecordingUrl')
     from_number = request.form.get('From') or "Unknown"
     call_sid = request.form.get('CallSid', 'N/A')
     duration = request.form.get('RecordingDuration', '0')
 
-    logging.info(f"Voicemail ended. Creating Freshdesk ticket for {from_number}. RecordingUrl: {recording_url}")
+    logging.info(f"Voicemail ended. Creating Freshdesk ticket for {from_number} (standard). RecordingUrl: {recording_url}")
 
     subject = f"New Voicemail from {from_number}"
     description = (
@@ -111,33 +128,62 @@ def voicemail_freshdesk():
         "Please follow up with the caller."
     )
 
-    create_freshdesk_ticket(subject, description)
+    # Standard priority for normal voicemails
+    create_freshdesk_ticket(subject, description, priority=1)
 
     resp = VoiceResponse()
     resp.say("Thank you. We have created a support ticket from your voicemail. Goodbye.")
     resp.hangup()
     return Response(str(resp), mimetype='text/xml')
 
-def create_freshdesk_ticket(subject, description):
+@app.route("/voicemail-freshdesk-after-hours", methods=['POST'])
+def voicemail_freshdesk_after_hours():
+    """
+    Twilio POSTs here if a premium user calls outside business hours.
+    We label the Freshdesk ticket as 'Premium After-Hours' with higher priority.
+    """
+    recording_url = request.form.get('RecordingUrl')
+    from_number = request.form.get('From') or "Unknown"
+    call_sid = request.form.get('CallSid', 'N/A')
+    duration = request.form.get('RecordingDuration', '0')
+
+    logging.info(f"Voicemail ended. Creating Freshdesk ticket for {from_number} (premium after-hours). RecordingUrl: {recording_url}")
+
+    subject = f"AFTER-HOURS Premium Voicemail from {from_number}"
+    description = (
+        f"Call SID: {call_sid}\n"
+        f"Caller: {from_number}\n"
+        f"Duration: {duration} seconds\n"
+        f"Voicemail Recording: {recording_url}.mp3\n\n"
+        "This caller has a premium support subscription, but called after normal business hours.\n"
+        "Please prioritize follow-up with the caller as soon as possible."
+    )
+
+    # Higher priority (2=Medium, 3=High, 4=Urgent)
+    # Choose as you see fit. Let's set 2 or 3 to highlight it above standard tickets.
+    create_freshdesk_ticket(subject, description, priority=2)
+
+    resp = VoiceResponse()
+    resp.say("Thank you. We have created a priority ticket from your voicemail. Goodbye.")
+    resp.hangup()
+    return Response(str(resp), mimetype='text/xml')
+
+def create_freshdesk_ticket(subject, description, priority=1):
     """
     Calls Freshdesk API to create a ticket.
-    Adjust fields as needed (priority, status, etc.).
+    priority: 1=Low,2=Medium,3=High,4=Urgent
     """
     freshdesk_url = f"https://{FRESHDESK_DOMAIN}/api/v2/tickets"
 
     ticket_data = {
         "subject": subject,
         "description": description,
-        "email": "no-reply@sassousa-service.com",  # or a caller's email if known
-        "priority": 1,  # 1=Low,2=Medium,3=High,4=Urgent
-        "status": 2     # 2=Open,3=Pending,4=Resolved,5=Closed
+        "email": "no-reply@sassousa-service.com",
+        "priority": priority,  # we vary the priority for after-hours
+        "status": 2            # 2=Open
     }
 
-    headers = {
-        "Content-Type": "application/json"
-    }
-
-    # Basic Auth with API key
+    headers = {"Content-Type": "application/json"}
     response = requests.post(
         freshdesk_url,
         headers=headers,
@@ -153,31 +199,24 @@ def create_freshdesk_ticket(subject, description):
 def has_active_subscription(phone_number):
     """
     Checks if 'phone_number' belongs to any Stripe customer who has an active subscription.
-
-    We compare both:
+    Compares:
       1) main phone (customer.phone)
-      2) a comma-separated list of additional phones in customer.metadata["additional_phones"].
+      2) any phone in metadata["additional_phones"].
 
     e.g. metadata = {"additional_phones": "+15551230001,+15551230002"}
     """
     try:
         customers = stripe.Customer.list(limit=100)
         for customer in customers.auto_paging_iter():
-            # Main phone
             main_phone = (customer.get("phone") or "").strip()
-
-            # Additional phones in metadata
             extra_phones_str = customer.get("metadata", {}).get("additional_phones", "")
             extra_phones = [p.strip() for p in extra_phones_str.split(",") if p.strip()]
 
-            # If the caller's phone matches the main phone or any in the additional list
             if phone_number == main_phone or phone_number in extra_phones:
-                # Check if there's any active subscription for that customer
                 subs = stripe.Subscription.list(customer=customer.id, status="active")
                 if subs.data:
                     logging.info(f"Active subscription found for {phone_number}")
                     return True
-
         logging.info(f"No active subscription found for {phone_number}")
     except Exception as e:
         logging.error(f"Stripe error checking subscription for {phone_number}: {e}")
