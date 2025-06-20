@@ -1,0 +1,23 @@
+AWS EC2 commands using GitBash and in the EC2 instance
+
+---------------------Upload new python project to Ec2 from GitBash-----------------------------
+scp -i "C:/Users/Daniel/Downloads/Sasso Key.pem" "C:/Users/Daniel/PycharmProjects/FlaskProject/SassoTwilioConnector.py" ec2-user@52.14.35.115:/home/ec2-user/
+
+
+---------------------Upload new .env file (project API codes) to Ec2 from GitBash-----------------------------
+scp -i "C:/Users/Daniel/OneDrive/Desktop/Sasso Key.pem" "C:/Users/Daniel/PycharmProjects/FlaskProject/.env" ec2-user@52.14.35.115:/home/ec2-user/
+
+---------How to get the new script to run on EC2 in the Ec2 Instance---------------------
+To see the current processes (PID #s)
+sudo lsof -i :5000
+
+To Kill the PID processes using the old python script
+sudo kill -9 164128
+
+To Bind the EC2 instance to start using the new code
+gunicorn --bind 127.0.0.1:5000 SassoTwilioConnector:app
+---------------------------
+
+
+-----------aws gitbash login prompt-----------
+aws sso login --profile admin-1
