@@ -1,4 +1,4 @@
-# Sasso Twilio Connector
+# Twilio HubSpot Connector
 
 A Flask-based application that integrates Twilio with HubSpot to handle incoming calls, forward them to technicians, and log call information in HubSpot CRM.
 
@@ -21,8 +21,8 @@ A Flask-based application that integrates Twilio with HubSpot to handle incoming
 
 1. Clone the repository:
    ```
-   git clone https://github.com/your-username/sasso-twilio-connector.git
-   cd sasso-twilio-connector
+   git clone https://github.com/your-username/twilio-hubspot-connector.git
+   cd twilio-hubspot-connector
    ```
 
 2. Create a virtual environment and activate it:
@@ -68,7 +68,7 @@ Notes:
 ### Running Locally (Development)
 
 ```
-python SassoTwilioConnector.py
+python TwilioHubspotConnector.py
 ```
 
 This will start the Flask application on `http://0.0.0.0:5000`.
@@ -87,7 +87,7 @@ For production, it's recommended to use a WSGI server like Gunicorn:
 
 ```
 pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:5000 SassoTwilioConnector:app
+gunicorn -w 4 -b 0.0.0.0:5000 TwilioHubspotConnector:app
 ```
 
 You should also set up a reverse proxy (like Nginx) and configure SSL for secure connections.

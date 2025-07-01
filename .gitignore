@@ -1,11 +1,13 @@
 # Environments
 .env
+.env.local
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+pythonenv*
 
 # Python
 __pycache__/
@@ -25,25 +27,89 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # IDE specific files
 .idea/
 .vscode/
 *.swp
 *.swo
+.spyderproject
+.spyproject
+.ropeproject
+.project
+.pydevproject
+.settings/
 
 # OS specific files
 .DS_Store
 Thumbs.db
+desktop.ini
+*.lnk
+$RECYCLE.BIN/
+Icon?
 
-# Logs
+# Logs and databases
 *.log
+*.sql
+*.sqlite
+*.sqlite3
+*.db
 
-# Private keys
+# Private keys and credentials
 *.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+credentials.json
+client_secret*.json
 
 # AWS related files
 aws*stuff*new*evoice.txt
+aws-config*.txt
+.aws/
+aws-credentials
+aws_credentials
+.aws-credentials
+
+# Flask specific
+instance/
+.webassets-cache
+flask_session/
+
+# Temporary files
+*.bak
+*.tmp
+*.temp
+*~
+.~*
+*.swp
+*.swo
+.nfs*
+
+# Coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Processed calls file (application specific)
+processed_calls.json
