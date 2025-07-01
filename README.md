@@ -21,7 +21,7 @@ A Flask-based application that integrates Twilio with HubSpot to handle incoming
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/sasso-twilio-connector.git
+   git clone https://github.com/your-username/sasso-twilio-connector.git
    cd sasso-twilio-connector
    ```
 
@@ -165,7 +165,7 @@ If sensitive files were accidentally committed to your Git repository, follow th
 1. Add the sensitive files to `.gitignore`
 2. Remove the files from Git tracking (but keep them locally):
    ```
-   git rm --cached .env "Sasso Key.pem" "aws stuff new evoice.txt"
+   git rm --cached .env "private-key.pem" "aws-config.txt"
    git commit -m "Remove sensitive files from Git tracking"
    git push
    ```
@@ -178,8 +178,8 @@ For a more thorough removal that eliminates sensitive files from the repository 
 2. Create a text file named `sensitive-files.txt` with the names of files to remove:
    ```
    .env
-   Sasso Key.pem
-   aws stuff new evoice.txt
+   private-key.pem
+   aws-config.txt
    ```
 3. Run BFG to remove the files from history:
    ```
@@ -196,4 +196,10 @@ For a more thorough removal that eliminates sensitive files from the repository 
 
 ## License
 
-[Specify your license here]
+MIT License
+
+Copyright (c) 2023 Your Organization
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
