@@ -41,7 +41,13 @@ A Flask-based application that integrates Twilio with HubSpot to handle incoming
 
 ## Configuration
 
-Create a `.env` file in the project root with the following variables:
+A `.env.example` file is provided in the repository as a template. Copy this file to create your own `.env` file:
+
+```
+cp .env.example .env
+```
+
+Then edit the `.env` file with your actual credentials:
 
 ```
 TWILIO_SID=your_twilio_sid
@@ -139,6 +145,13 @@ The application maintains a record of processed calls to prevent duplicates. The
 ## Security Considerations
 
 - Keep your `.env` file secure and never commit it to version control
+  - A `.gitignore` file is included in the repository that excludes the `.env` file
+  - Always verify that your `.env` file is not being tracked before pushing changes
+  - Use `git status` to confirm that `.env` is not listed in the tracked files
+- The `.gitignore` file also excludes:
+  - Private keys (*.pem files)
+  - AWS-related configuration files
+- Use `.env.example` as a template without including any real credentials
 - Rotate your Twilio and HubSpot credentials periodically
 - Use HTTPS for all production deployments
 - Consider implementing IP restrictions for your webhooks in Twilio
