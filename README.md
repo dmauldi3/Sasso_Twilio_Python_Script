@@ -156,6 +156,44 @@ The application maintains a record of processed calls to prevent duplicates. The
 - Use HTTPS for all production deployments
 - Consider implementing IP restrictions for your webhooks in Twilio
 
+### Removing Sensitive Files from Git Repository
+
+If sensitive files were accidentally committed to your Git repository, follow these steps to remove them:
+
+#### Option 1: Remove files from future commits (files remain in history)
+
+1. Add the sensitive files to `.gitignore`
+2. Remove the files from Git tracking (but keep them locally):
+   ```
+   git rm --cached .env "Sasso Key.pem" "aws stuff new evoice.txt"
+   git commit -m "Remove sensitive files from Git tracking"
+   git push
+   ```
+
+#### Option 2: Completely remove files from Git history
+
+For a more thorough removal that eliminates sensitive files from the repository history:
+
+1. Install the BFG Repo-Cleaner (https://rtyley.github.io/bfg-repo-cleaner/)
+2. Create a text file named `sensitive-files.txt` with the names of files to remove:
+   ```
+   .env
+   Sasso Key.pem
+   aws stuff new evoice.txt
+   ```
+3. Run BFG to remove the files from history:
+   ```
+   bfg --delete-files sensitive-files.txt
+   ```
+4. Clean up and push the changes:
+   ```
+   git reflog expire --expire=now --all
+   git gc --prune=now --aggressive
+   git push --force
+   ```
+
+**Warning**: Option 2 rewrites Git history and requires a force push, which can cause issues for collaborators. Make sure all team members are aware before proceeding.
+
 ## License
 
 [Specify your license here]
